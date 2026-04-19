@@ -1,0 +1,21 @@
+# Lab 2 — same HTTP contract as lab1; manager mapped to host :8081 (8080 is for lab1).
+# Run from this folder:  docker compose up --build
+# Scale workers:  docker compose up --build --scale worker=3
+
+### health
+GET http://localhost:8081/
+
+### crack "abcd" maxLength 4
+POST http://localhost:8081/api/hash/crack
+Content-Type: application/json
+
+{"hash": "e2fc714c4727ee9395f324cd2e7f331f", "maxLength": 4}
+
+### status (paste requestId)
+GET http://localhost:8081/api/hash/status?requestId=ID
+
+### metrics
+GET http://localhost:8081/api/metrics
+
+### list tasks
+GET http://localhost:8081/api/hash/tasks

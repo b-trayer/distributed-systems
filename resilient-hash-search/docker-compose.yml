@@ -1,0 +1,102 @@
+services:
+  mongo1:
+    image: mongo:6
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    hostname: mongo1
+    volumes: [mongo1_data:/data/db]
+
+  mongo2:
+    image: mongo:6
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    hostname: mongo2
+    volumes: [mongo2_data:/data/db]
+
+  mongo3:
+    image: mongo:6
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    hostname: mongo3
+    volumes: [mongo3_data:/data/db]
+
+  mongo-init:
+    image: mongo:6
+    depends_on: [mongo1, mongo2, mongo3]
+    restart: "no"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        echo "waiting for mongod..."
+        sleep 25
+        mongosh --host mongo1:27017 --quiet --eval '
+          try { rs.status(); print("replica set ok"); } catch (e) {
+            rs.initiate({
+              _id: "rs0",
+              members: [
+                { _id: 0, host: "mongo1:27017" },
+                { _id: 1, host: "mongo2:27017" },
+                { _id: 2, host: "mongo3:27017" }
+              ]
+            });
+            print("replica set initiated");
+          }
+        '
+        echo "mongo-init done"
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: crack
+      RABBITMQ_DEFAULT_PASS: crack
+    volumes: [rabbitmq_data:/var/lib/rabbitmq]
+
+  manager:
+    build: ./manager
+    ports:
+      - "8081:8080"
+    environment:
+      MONGO_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0
+      WORKERS_COUNT: ${WORKERS_COUNT:-1}
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      mongo1:
+        condition: service_started
+      mongo2:
+        condition: service_started
+      mongo3:
+        condition: service_started
+
+  dispatcher:
+    build: ./dispatcher
+    environment:
+      MONGO_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0
+      RABBIT_URL: amqp://crack:crack@rabbitmq:5672/
+      WORKERS_COUNT: ${WORKERS_COUNT:-1}
+      PART_STALE_SEC: "1800"
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_started
+      mongo1:
+        condition: service_started
+
+  worker:
+    build: ./worker
+    environment:
+      MONGO_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0
+      RABBIT_URL: amqp://crack:crack@rabbitmq:5672/
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_started
+
+volumes:
+  mongo1_data:
+  mongo2_data:
+  mongo3_data:
+  rabbitmq_data:
