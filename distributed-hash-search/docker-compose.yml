@@ -1,0 +1,17 @@
+services:
+  manager:
+    build: ./manager
+    ports:
+      - "8080:8080"
+    environment:
+      WORKER_URL: http://worker:8080
+      WORKERS_COUNT: ${WORKERS_COUNT:-1}
+      TASK_TIMEOUT: 60
+    depends_on:
+      - worker
+
+  worker:
+    build: ./worker
+    environment:
+      MANAGER_URL: http://manager:8080
+      RETRY_COUNT: 5

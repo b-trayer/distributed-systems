@@ -1,0 +1,128 @@
+# MD5 maps an arbitrary string to a 32-character hex digest (128 bits).
+# Same input always yields the same digest, e.g.:
+#
+#   "abcd"  -> e2fc714c4727ee9395f324cd2e7f331f
+#   "test"  -> 098f6bcd4621d373cade4e832627b4f6
+#   "hello" -> 5d41402abc4b2a76b9719d911017c592
+#
+# Properties (informal):
+#   - One-way: you cannot recover the preimage from the digest alone
+#   - Deterministic: same string -> same digest
+#   - Avalanche: small input changes produce unrelated digests
+#   - Fixed output size: always 32 hex chars
+#
+# "Cracking" here means brute force: enumerate candidate strings, hash with MD5,
+# compare to the target digest; repeat until a match or the search space is exhausted.
+#
+# Run the stack (example: 4 workers). From repo root:
+#   WORKERS_COUNT=4 docker compose -f distributed-hash-search/docker-compose.yml up --build --scale worker=4
+# Or from distributed-hash-search/:  WORKERS_COUNT=4 docker compose up --build --scale worker=4
+#
+# Requests below:
+
+### 1. Crack MD5 for word "abcd", maxLength 4 (assignments 4.1, 4.2)
+# expect: requestId + estimatedCombinations = N
+POST http://localhost:8080/api/hash/crack
+Content-Type: application/json
+
+{"hash": "e2fc714c4727ee9395f324cd2e7f331f", "maxLength": 4}
+
+### 2. Status poll (replace requestId from step 1; assignment 4.3)
+# expect: {"status": "READY", "data": ["abcd"]}
+GET http://localhost:8080/api/hash/status?requestId=ID
+
+# curl "http://localhost:8080/api/hash/status?requestId=ID"
+
+### 3. Idempotency — same body should return the same requestId (assignment 4.2)
+# expect: same requestId as step 1, not a new one
+POST http://localhost:8080/api/hash/crack
+Content-Type: application/json
+
+{"hash": "e2fc714c4727ee9395f324cd2e7f331f", "maxLength": 4}
+
+### 4. Crack MD5 for word "cat" (assignments 4.1, 4.2)
+# expect: estimatedCombinations = 1679616, then status READY, data: ["cat"]
+POST http://localhost:8080/api/hash/crack
+Content-Type: application/json
+
+{"hash": "d077f244def8a70e5ea758bd8352fcd8", "maxLength": 4}
+
+### 5. Crack MD5 for word "hi" (assignments 4.1, 4.2)
+# expect: status READY, data: ["hi"]
+POST http://localhost:8080/api/hash/crack
+Content-Type: application/json
+
+{"hash": "49f68a5c8493ec2c0bf489821c21fc3b", "maxLength": 4}
+
+### 6. Crack MD5 for word "test" (assignments 4.1, 4.2)
+# expect: status READY, data: ["test"]
+POST http://localhost:8080/api/hash/crack
+Content-Type: application/json
+
+{"hash": "098f6bcd4621d373cade4e832627b4f6", "maxLength": 4}
+
+### 7. Cancel a task (replace requestId; assignment 4.4)
+# expect: {"status": "CANCELLED"}
+DELETE http://localhost:8080/api/hash/crack?requestId=ID
+
+# curl -X DELETE "http://localhost:8080/api/hash/crack?requestId=ID"
+
+### 8. Status of a cancelled task (assignment 4.3)
+# expect: {"status": "CANCELLED", "data": null}
+GET http://localhost:8080/api/hash/status?requestId=ID
+
+# curl "http://localhost:8080/api/hash/status?requestId=ID"
+
+### 9. Unknown requestId — error surfaced to the client (assignments 2.1, 4.3)
+# expect: {"status": "ERROR", "data": null, "error": "request not found"}
+GET http://localhost:8080/api/hash/status?requestId=BAD_ID
+
+# curl "http://localhost:8080/api/hash/status?requestId=BAD_ID"
+
+### 10. Metrics (assignment 4.5)
+# expect: totalTasks, activeTasks, completedTasks, avgExecutionTime
+GET http://localhost:8080/api/metrics
+
+# curl http://localhost:8080/api/metrics
+
+### 11. List all tasks
+# expect: array of tasks with status and results
+GET http://localhost:8080/api/hash/tasks
+
+# curl http://localhost:8080/api/hash/tasks
+
+### 12. Custom alphabet — digits only, MD5 of "1234" (assignment 4.1)
+# expect: estimatedCombinations = 10000 (10^4), then data: ["1234"]
+POST http://localhost:8080/api/hash/crack
+Content-Type: application/json
+
+{"hash": "81dc9bdb52d04dc20036dbd8313ed055", "maxLength": 4, "alphabet": "0123456789"}
+
+### 13. Longer brute-force (maxLength=5); may take noticeably longer (assignment 5.1)
+# expect: estimatedCombinations = 60466176 (36^5); runtime increases
+POST http://localhost:8080/api/hash/crack
+Content-Type: application/json
+
+{"hash": "e2fc714c4727ee9395f324cd2e7f331f", "maxLength": 5}
+
+### 14. [extra] Single-character preimage "a" (assignment 4.1)
+# expect: data: ["a"]; small space — 36 candidates at maxLength=1
+POST http://localhost:8080/api/hash/crack
+Content-Type: application/json
+
+{"hash": "0cc175b9c0f1b6a831c399e269772661", "maxLength": 1}
+
+### 15. [extra] Numeric word "42" with digit alphabet (assignment 4.1)
+# expect: data: ["42"], estimatedCombinations = 100 (10^2)
+POST http://localhost:8080/api/hash/crack
+Content-Type: application/json
+
+{"hash": "a1d0c6e83f027327d8461063f4ac58a6", "maxLength": 2, "alphabet": "0123456789"}
+
+### 16. [extra] No preimage in search space — word longer than maxLength (assignment 4.3)
+# expect: status READY, data: [] (empty — nothing found)
+# Target is MD5("hello") but maxLength=3, so "hello" is out of scope
+POST http://localhost:8080/api/hash/crack
+Content-Type: application/json
+
+{"hash": "5d41402abc4b2a76b9719d911017c592", "maxLength": 3}
